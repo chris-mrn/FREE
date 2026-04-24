@@ -5,6 +5,9 @@ def run(cmd):
     print(f">> {cmd}")
     subprocess.run(cmd, shell=True, check=True)
 
+# Install PyTorch compatible with P100 (sm_60, dropped in PyTorch 2.4+)
+run("pip install -q torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu121")
+
 # Install dependencies
 run("pip install -q absl-py torchdyn pot clean-fid torchdiffeq")
 
