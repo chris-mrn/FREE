@@ -254,7 +254,7 @@ def train(argv):
             vt = net_model(t, xt)
             if FLAGS.use_weight:
                 w = torch.from_numpy(
-                    np.interp(t.cpu().numpy(), w_t_grid.cpu().numpy(), w_t_values.cpu().numpy())
+                    np.interp(t.cpu().numpy(), w_t_grid, w_t_values)
                 ).float().to(device)  # (B,)
                 per_sample = ((vt - ut) ** 2).mean(dim=[1, 2, 3])  # (B,)
                 loss = (w * per_sample).mean()
