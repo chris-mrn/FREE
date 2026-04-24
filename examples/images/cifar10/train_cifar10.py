@@ -6,11 +6,15 @@
 import copy
 import os
 
+import matplotlib
+import numpy as np
 import torch
 from absl import app, flags
 from torchvision import datasets, transforms
-from tqdm import trange
+from tqdm import tqdm, trange
 from utils_cifar import ema, generate_samples, infiniteloop
+
+matplotlib.use("Agg")
 
 from torchcfm.conditional_flow_matching import (
     ConditionalFlowMatcher,
@@ -38,6 +42,7 @@ flags.DEFINE_integer("batch_size", 128, help="batch size")  # Lipman et al uses 
 flags.DEFINE_integer("num_workers", 4, help="workers of Dataloader")
 flags.DEFINE_float("ema_decay", 0.9999, help="ema decay rate")
 flags.DEFINE_bool("parallel", False, help="multi gpu training")
+flags.DEFINE_bool("use_weight", False, help="use time-dependent loss weighting w(t) = C/v(t)")
 
 # Evaluation
 flags.DEFINE_integer(
@@ -49,6 +54,105 @@ flags.DEFINE_integer(
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
+
+
+def _score_chunked(t_val, xt_flat, x1_flat, chunk_size=16):
+    """nabla log p_t(xt) via mixture-of-Gaussians closed form.
+
+    Uses the identity:
+        nabla log p_t(x) = softmax(-||t*x1^i - x||^2 / (2*(1-t)^2))_i  *  (t*x1^i - x) / (1-t)^2
+
+    Chunked over xt to avoid a (B_xt, B_x1, D) tensor larger than GPU memory.
+    """
+    inv_var = 1.0 / (1.0 - t_val) ** 2
+    mu = t_val * x1_flat  # (B_x1, D)
+    scores = []
+    with torch.no_grad():
+        for start in range(0, xt_flat.shape[0], chunk_size):
+            xt_chunk = xt_flat[start : start + chunk_size]  # (chunk, D)
+            diff = mu.unsqueeze(0) - xt_chunk.unsqueeze(1)  # (chunk, B_x1, D)
+            sq_dist = (diff ** 2).sum(-1)  # (chunk, B_x1)
+            weights = torch.softmax(-sq_dist * inv_var / 2.0, dim=1)  # (chunk, B_x1)
+            scores.append((weights.unsqueeze(-1) * diff).sum(1) * inv_var)
+    return torch.cat(scores, dim=0)  # (B_xt, D)
+
+
+def compute_weighting(dataset, savedir, n_times=100, batch_size=512, eps_fd=1e-3):
+    """Pre-compute w(t) = C / v(t) where:
+        v(t) = sqrt( E[ ||d/dt nabla log p_t(X_t)||^2 ] )
+        C    = int_0^1 v(s) ds
+
+    d/dt score is estimated by central finite differences in t, keeping x_t fixed.
+    Returns (t_grid, w_values) as numpy arrays.
+    """
+    import matplotlib.pyplot as plt
+    from torch.utils.data import DataLoader
+
+    print("Pre-computing time-dependent weighting w(t) ...")
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
+    data_iter = iter(loader)
+
+    t_grid = np.linspace(0.01, 0.98, n_times)
+    v_values = np.zeros(n_times)
+
+    for idx, t_val in enumerate(tqdm(t_grid, desc="v(t)")):
+        try:
+            x1, _ = next(data_iter)
+        except StopIteration:
+            data_iter = iter(loader)
+            x1, _ = next(data_iter)
+
+        x1 = x1.to(device)
+        x0 = torch.randn_like(x1)
+        x1_flat = x1.reshape(x1.shape[0], -1)
+        x0_flat = x0.reshape(x0.shape[0], -1)
+
+        # Sample x_t from p_t; kept fixed while we vary t in the FD stencil
+        xt_flat = (t_val * x1_flat + (1.0 - t_val) * x0_flat).detach()
+
+        t_plus = min(t_val + eps_fd, 0.9999)
+        t_minus = max(t_val - eps_fd, 0.0001)
+
+        score_plus = _score_chunked(t_plus, xt_flat, x1_flat)
+        score_minus = _score_chunked(t_minus, xt_flat, x1_flat)
+        dscore_dt = (score_plus - score_minus) / (t_plus - t_minus)  # (B, D)
+
+        v_values[idx] = dscore_dt.pow(2).mean().sqrt().item()
+
+    C = float(np.trapezoid(v_values, t_grid))
+    w_values = C / (v_values + 1e-8)
+
+    # Compute alpha^* by inverting (alpha^*)^{-1}(t) = (1/C) * int_0^t v(s) ds
+    cum_v = np.array([float(np.trapezoid(v_values[:i+1], t_grid[:i+1])) for i in range(len(t_grid))])
+    cum_v_norm = cum_v / (cum_v[-1] + 1e-8)  # (alpha^*)^{-1} on t_grid
+    # alpha^*(t): for each t, find s s.t. cum_v_norm(s) = t
+    t_uniform = np.linspace(0, 1, 1000)
+    alpha_star = np.interp(t_uniform, cum_v_norm, t_grid)
+
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    axes[0].plot(t_grid, v_values)
+    axes[0].set_xlabel("t")
+    axes[0].set_ylabel("v(t)")
+    axes[0].set_title(r"$v(t) = \sqrt{E[\|\partial_t \nabla \log p_t(X_t)\|^2]/d}$")
+    axes[1].plot(t_grid, w_values)
+    axes[1].set_xlabel("t")
+    axes[1].set_ylabel("w(t)")
+    axes[1].set_title(r"$w(t) = C \,/\, v(t)$")
+    axes[2].plot(t_uniform, alpha_star)
+    axes[2].plot([0, 1], [0, 1], "k--", linewidth=0.8, label="identity")
+    axes[2].set_xlabel("t")
+    axes[2].set_ylabel(r"$\alpha^*(t)$")
+    axes[2].set_title(r"Noise schedule $\alpha^*(t)$")
+    axes[2].legend()
+    plt.tight_layout()
+    plot_path = os.path.join(savedir, "weighting.png")
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    print(f"Weighting plot saved to {plot_path}")
+
+    return t_grid, w_values
 
 
 def warmup_lr(step):
@@ -136,6 +240,13 @@ def train(argv):
     savedir = FLAGS.output_dir + FLAGS.model + "/"
     os.makedirs(savedir, exist_ok=True)
 
+    # ---- optional time-dependent weighting ----
+    w_t_grid = w_t_values = None
+    if FLAGS.use_weight:
+        w_t_grid, w_t_values = compute_weighting(dataset, savedir)
+        w_t_grid = torch.from_numpy(w_t_grid).float().to(device)
+        w_t_values = torch.from_numpy(w_t_values).float().to(device)
+
     with trange(FLAGS.total_steps, dynamic_ncols=True) as pbar:
         for step in pbar:
             optim.zero_grad()
@@ -143,7 +254,12 @@ def train(argv):
             x0 = torch.randn_like(x1)
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x1)
             vt = net_model(t, xt)
-            loss = torch.mean((vt - ut) ** 2)
+            if FLAGS.use_weight:
+                w = torch.interp(t, w_t_grid, w_t_values)  # (B,)
+                per_sample = ((vt - ut) ** 2).mean(dim=[1, 2, 3])  # (B,)
+                loss = (w * per_sample).mean()
+            else:
+                loss = torch.mean((vt - ut) ** 2)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net_model.parameters(), FLAGS.grad_clip)  # new
             optim.step()
