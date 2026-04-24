@@ -1,30 +1,47 @@
-import subprocess
-import sys
 import os
+import subprocess
 
-def run(cmd, **kwargs):
+def run(cmd):
     print(f">> {cmd}")
-    subprocess.run(cmd, shell=True, check=True, **kwargs)
+    subprocess.run(cmd, shell=True, check=True)
 
 # Install dependencies
-run("pip install -q absl-py torchdyn pot clean-fid")
+run("pip install -q absl-py torchdyn pot clean-fid torchdiffeq")
 
-# Clone the repo
+# Clone repo
 run("git clone https://github.com/chris-mrn/FREE.git")
 
-# Install torchcfm from the cloned repo
+# Install torchcfm from source
 run("pip install -q -e FREE/")
 
-# Move into the CIFAR10 training directory
 os.chdir("FREE/examples/images/cifar10")
 
-# Run training with time-dependent weighting
+RESULTS_DIR = "/kaggle/working/results/"
+MODEL = "fm"
+TOTAL_STEPS = 400000
+
+# Train
+# Architecture: UNet (not Diffusion Transformer)
+# Weights saved every 20000 steps under RESULTS_DIR/fm/
+# Generated image grids saved alongside each checkpoint
 run(
-    "python train_cifar10.py"
-    " --model fm"
-    " --use_weight"
-    " --total_steps 400001"
-    " --batch_size 128"
-    " --num_workers 2"
-    " --output_dir /kaggle/working/results/"
+    f"python train_cifar10.py"
+    f" --model {MODEL}"
+    f" --use_weight"
+    f" --total_steps {TOTAL_STEPS + 1}"
+    f" --save_step 20000"
+    f" --batch_size 128"
+    f" --num_workers 2"
+    f" --output_dir {RESULTS_DIR}"
+)
+
+# Compute FID with the final EMA checkpoint
+run(
+    f"python compute_fid.py"
+    f" --model {MODEL}"
+    f" --step {TOTAL_STEPS}"
+    f" --input_dir {RESULTS_DIR}"
+    f" --integration_method dopri5"
+    f" --num_gen 50000"
+    f" --batch_size_fid 1024"
 )
