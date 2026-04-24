@@ -244,8 +244,6 @@ def train(argv):
     w_t_grid = w_t_values = None
     if FLAGS.use_weight:
         w_t_grid, w_t_values = compute_weighting(dataset, savedir)
-        w_t_grid = torch.from_numpy(w_t_grid).float().to(device)
-        w_t_values = torch.from_numpy(w_t_values).float().to(device)
 
     with trange(FLAGS.total_steps, dynamic_ncols=True) as pbar:
         for step in pbar:
@@ -255,7 +253,9 @@ def train(argv):
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x1)
             vt = net_model(t, xt)
             if FLAGS.use_weight:
-                w = torch.interp(t, w_t_grid, w_t_values)  # (B,)
+                w = torch.from_numpy(
+                    np.interp(t.cpu().numpy(), w_t_grid.cpu().numpy(), w_t_values.cpu().numpy())
+                ).float().to(device)  # (B,)
                 per_sample = ((vt - ut) ** 2).mean(dim=[1, 2, 3])  # (B,)
                 loss = (w * per_sample).mean()
             else:
