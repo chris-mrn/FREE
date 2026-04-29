@@ -173,3 +173,12 @@ slurm*.out
 notebooks/figures/
 
 .DS_Store
+
+# Claude Code internals
+.claude/
+
+# Large model / output artifacts
+outputs/hf_cache/
+weights/
+*.safetensors
+*.bin

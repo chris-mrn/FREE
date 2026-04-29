@@ -1,0 +1,11 @@
+
+Metric                                    Model @50K  (Hutchinso  Model @100K (Hutchinso  Uniform               
+----------------------------------------------------------------------------------------------------------------
+  Pearson r (log-norm speed, vs FR batch)                  0.8867                  0.8870                       —
+  Spearman ρ (speed, vs FR batch)                         1.0000                  1.0000                       —
+  KL(model ∥ FR batch)                                    0.6083                  0.6084                  1.6735
+  KL(FR batch ∥ model)                                    0.3190                  0.3187                  0.7249
+  Wasserstein-1 (density)                                 0.1632                  0.1632                  0.2944
+  Peak t of p(t)                                          0.0100                  0.0100                  0.0100
+  Mass t < 0.30                                           0.4861                  0.4863                  0.3086
+  Mass t > 0.70                                           0.0993                  0.0994                  0.2645
