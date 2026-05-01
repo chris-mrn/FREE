@@ -230,7 +230,68 @@ Steps 200,000 and 200,001 (final EMA save) give *identical* FID values to 4 sign
 figures at all NFE values, confirming the model has fully converged and the final save
 is reliable.
 
-### 6. Best Result in Context
+### 6. Energy Repartition Under Arc-Length Reparametrisation
+
+**Job**: 2812484 — `scripts/compute_reparam_div.py` on EMA checkpoint step 200K.
+
+The central theoretical claim of the arc-length curriculum is that training with
+$p(t) \propto 1/v_t^{FR}$ equalises the divergence energy across time, i.e. the
+quantity:
+
+$$D(s) = E\!\left[(\mathrm{div}\, u_s^\theta(X_{\alpha(s)}))^2\right]$$
+
+should be approximately constant in the arc-length parameter $s \in [0,1]$.
+Here the model is queried at arc-length coordinate $s$ and the sample is drawn
+at physical time $\tau = \alpha(s)$.
+
+**Setup**: $n_t = 200$, $B = 256$, 5 Hutchinson probes, 3 epochs averaged.
+Speed source: `fr_speed_step100000.npy` ($v_t^{FR} \in [28.4, 59{,}350]$, ratio 2093×).
+
+#### Raw vs reparametrised divergence energy
+
+| | Mean $E[(\mathrm{div})^2]$ | Std | CV = std/mean |
+|---|---|---|---|
+| Raw $D_\text{raw}(t)$, uniform $t$ | 1.84 × 10⁸ | 5.60 × 10⁸ | **3.050** |
+| Reparametrised $D(s)$, arc-length $s$ | 6.37 × 10⁷ | 4.82 × 10⁸ | **7.567** |
+
+The CV **increased** from 3.05 → 7.57 after reparametrisation — the energy distribution
+became *more* non-uniform, not less.
+
+Both curves are **U-shaped** with extreme values at the boundaries:
+
+| Point | $t$ or $\tau$ | $D_\text{raw}(t)$ | $D(s)$ |
+|-------|--------------|-------------------|--------|
+| Boundary ($t \approx 0$) | 0.020 | 4.02 × 10⁹ | 4.08 × 10⁹ |
+| Mid-trajectory | 0.50 / 0.56 | 243 | 256 |
+| Boundary ($t \approx 1$) | 0.980 | 4.00 × 10⁹ | 5.52 × 10⁹ |
+
+Dynamic range ≈ 16 million×.
+
+#### Interpretation
+
+The arc-length reparametrisation $\alpha$ re-indexes the time axis but **does not
+flatten the divergence energy**. Two reasons:
+
+1. **Stale speed profile**: $\alpha$ was built from the FR speed at step 100K (before the
+   curriculum was fully active). By step 200K the model's speed structure had changed
+   substantially, making $\alpha$ mis-calibrated.
+
+2. **Structural boundary effect**: The U-shape is intrinsic to the self-interpolant.
+   Near $t=0$ and $t=1$, $X_t \approx X_1$ or $\tilde{X}_1$ (clean data), so the flow
+   must strongly expand or compress probability mass — producing large $(\mathrm{div}\,u)^2$
+   regardless of the training distribution over $t$.
+
+The reparametrisation maps $s \in [0, 0.25]$ to $\tau \in [0.02, 0.08]$ and
+$s \in [0.75, 1.00]$ to $\tau \in [0.92, 0.99]$, concentrating arc-length near both
+boundaries — which is where the divergence is already largest. This compounds rather
+than cancels the non-uniformity in $s$.
+
+Output files: `div_sq_reparam.png`, `div_sq_reparam_mean.npy`, `div_sq_uniform_mean.npy`
+(see Artifacts below).
+
+---
+
+### 7. Best Result in Context
 
 | Model | FID | NFE | Notes |
 |-------|-----|-----|-------|
@@ -238,6 +299,7 @@ is reliable.
 | Self-FM (step 200K) | **5.43** | 100 | same model |
 | Self-FM (step 200K) | **14.37** | 50 | same model |
 | Self-FM (step 150K) | **4.36** | 200 | mid-training |
+| Self-FM uniform ablation (step 150K) | pending | — | no curriculum, uniform t throughout; eval job 2816067 |
 
 A FID of **3.26** at NFE=200 is competitive with strong baselines on CIFAR-10 unconditional
 generation, achieved without any Gaussian noise source — the model purely maps data to data.
@@ -262,6 +324,12 @@ generation, achieved without any Gaussian noise source — the model purely maps
 5. **Convergence is clean**: The final checkpoint (200,001) matches step 200,000 exactly,
    and the loss curve is smooth throughout the arc-length phase (~0.47–0.46).
 
+6. **Arc-length reparametrisation does not equalise divergence energy**: The CV of
+   $D(s) = E[(\mathrm{div}\,u_s^\theta(X_{\alpha(s)}))^2]$ increases from 3.05 (raw)
+   to 7.57 (reparametrised). The divergence energy remains U-shaped with 16M× dynamic
+   range, due to a combination of a stale speed profile (estimated at step 100K) and
+   the structural boundary effect of the self-interpolant.
+
 ---
 
 ## Artifacts
@@ -282,6 +350,14 @@ generation, achieved without any Gaussian noise source — the model purely maps
 | `eval_samples/` | Sample grids at NFE=35 per checkpoint |
 | `train_2791486.log` | Full training log (SLURM job 2791486) |
 | `eval_2793225.log` | Full evaluation log (SLURM job 2793225) |
+| `div_sq_reparam.png` | 3-panel energy repartition plot (raw / reparametrised / α mapping) |
+| `div_sq_reparam_mean.npy` | $D(s)$ averaged over 3 epochs |
+| `div_sq_reparam_std.npy` | Std of $D(s)$ over epochs |
+| `div_sq_reparam_s_grid.npy` | Arc-length grid $s$ |
+| `div_sq_reparam_tau_grid.npy` | Physical time $\tau = \alpha(s)$ |
+| `div_sq_uniform_mean.npy` | Raw $D_\text{raw}(t)$ on uniform $t$-grid |
+| `div_sq_uniform_t_grid.npy` | Uniform $t$-grid |
+| `reparam_div_2812484.log` | Energy repartition sweep log (SLURM job 2812484) |
 
 ---
 

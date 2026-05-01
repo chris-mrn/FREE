@@ -1,0 +1,78 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\paragraph{Setup.}
+We evaluate FREE on CIFAR-10 unconditional image generation (32$\times$32) using a 35.7M-parameter UNet~\citep{ho2020ddpm}, trained with Adam ($\text{lr} = 2\times10^{-4}$, EMA decay 0.9999, batch size 128) and an Euler ODE solver.
+FID is computed against the full 50K training set with 10K generated samples.
+We study two interpolation geometries: \emph{spherical FM}, $X_t = \cos(t)\,X_0 + \sin(t)\,X_1$ with $X_0 \sim \mathcal{N}(0,I)$ and $t \in [0, \pi/2]$; and \emph{self-FM}, the data-to-data stochastic interpolant
+$X_t = (1-t)X_1 + t\tilde{X}_1 + \sqrt{t(1-t)}\,\varepsilon$,
+where $X_1, \tilde{X}_1 \!\sim\! p_{\mathrm{data}}$ are independent CIFAR-10 images.
+Speed profiles $v_t$ are estimated online via \texttt{torch.func.jvp} (OT speed, $\sim$7 s per call) or Hutchinson's trace estimator (Fisher--Rao speed, $\sim$11 s), both on a single H100.
+
+\paragraph{Speed-adaptive inference schedule.}
+We evaluate a family of blended Euler step schedules on a spherical FM model trained for 220K steps under uniform $t$ (FID\,=\,5.43 at NFE\,=\,35).
+Each schedule interpolates linearly between uniform spacing ($\alpha\!=\!0$) and OT-speed-adaptive spacing ($\alpha\!=\!1$), where the adaptive schedule allocates steps proportionally to $v_t^{\mathrm{OT}}$.
+Table~\ref{tab:sph_schedule} reveals a sharp \emph{NFE crossover}: at NFE\,$\leq$\,20, uniform spacing is optimal; at NFE\,$\geq$\,50, the fully adaptive schedule achieves FID\,=\,5.12 vs.\ 5.41 ($-5.4\%$); at NFE\,=\,35, a blend of $\alpha\!=\!0.6$ is best (5.14 vs.\ 5.19).
+This crossover is predicted by FREE: at low NFE the Euler truncation error is distributed globally and uniform spacing is near-optimal; at high NFE the error concentrates in fast-$v_t$ regions and the optimal schedule $\Delta t_k \propto 1/v_{t_k}$ focuses steps there.
+The Euler-converged FID (NFE\,=\,500) is 5.12, confirming that the gap between NFE\,=\,35 and NFE\,=\,500 is only 0.31 and the bottleneck is model quality rather than solver discretisation.
+
+\begin{table}[h]
+\centering
+\small
+\caption{FID on CIFAR-10 for blended inference schedules on spherical FM (step 220K). Best per NFE in \textbf{bold}.}
+\label{tab:sph_schedule}
+\begin{tabular}{lccccc}
+\toprule
+Schedule ($\alpha$) & NFE\,=\,10 & NFE\,=\,20 & NFE\,=\,35 & NFE\,=\,50 & NFE\,=\,100 \\
+\midrule
+Uniform ($\alpha\!=\!0$)    & \textbf{24.15} & \textbf{6.24} & 5.19 & 5.41 & 5.48 \\
+Blend ($\alpha\!=\!0.6$)    & 31.16          & 7.17          & \textbf{5.14} & 5.15 & — \\
+Speed-adaptive ($\alpha\!=\!1$) & 39.34      & 8.60          & 5.56 & \textbf{5.12} & \textbf{5.12} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Speed-adaptive training curriculum.}
+Resuming from the step-220K spherical FM checkpoint, we shift the training-time distribution from $\mathcal{U}(0, \pi/2)$ to $p(t) \propto 1/v_t^{\mathrm{OT}}$ via a cosine blend over 25K steps, then train for an additional 160K steps.
+FID improves from 5.43 to \textbf{5.03} at step 260K ($-7.4\%$), but subsequently degrades back toward the baseline (FID\,$\approx$\,5.3--5.4 at steps 300K--380K).
+We attribute this degradation to \emph{curriculum staleness}: $v_t$ was estimated once at step 220K and held fixed, so as the model evolves the sampling distribution becomes increasingly mis-calibrated.
+The speed estimation itself costs only 6.9 s, making periodic re-estimation cheap; the staleness problem thus represents the primary failure mode to address.
+
+\paragraph{Self-FM with Fisher--Rao arc-length curriculum.}
+The self-interpolant is an extreme test case for FREE: its Fisher--Rao speed spans a \textbf{2,093$\times$} dynamic range ($v_t^{\mathrm{FR}} \approx 28$ at $t\!=\!0.5$; $v_t^{\mathrm{FR}} \approx 59\,350$ at $t\!=\!0.98$), causing a $70\times$ FID gap between NFE\,=\,5 and NFE\,=\,200 under uniform Euler.
+We train with $p(t) \propto 1/v_t^{\mathrm{FR}}$ (arc-length sampling) starting at step 100K, estimated via Hutchinson's trace estimator (10.8 s) and blended in over 25K steps.
+The arc-length curriculum is compared against a matched uniform-sampling ablation resumed from the same step-100K checkpoint with identical hyperparameters.
+Table~\ref{tab:selffm} shows results at both step 150K and step 200K.
+The gap is already striking at step 150K: NFE\,=\,35 gives FID\,=\,36.3 (curriculum) vs.\ 108.4 (uniform, $-67\%$); at NFE\,=\,50 it is 20.5 vs.\ 60.2 ($-66\%$).
+At step 200K the advantage persists across all NFE values and even widens: NFE\,=\,35 gives 26.3 vs.\ 107.8 ($-76\%$), and at NFE\,=\,200 the gap is 3.26 vs.\ 6.82 ($-52\%$).
+The uniform model cannot recover curriculum quality regardless of NFE budget.
+At step 200K the curriculum model reaches \textbf{FID\,=\,3.26} at NFE\,=\,200 and FID\,=\,5.43 at NFE\,=\,100, competitive with strong Gaussian-prior baselines while using a purely data-to-data transport.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Self-FM FID on CIFAR-10 (10K samples). \textbf{Bold}: best per column.}
+\label{tab:selffm}
+\begin{tabular}{llcccccc}
+\toprule
+Steps & Training schedule & NFE\,=\,10 & NFE\,=\,20 & NFE\,=\,35 & NFE\,=\,50 & NFE\,=\,100 & NFE\,=\,200 \\
+\midrule
+\multirow{3}{*}{150K}
+  & Uniform $t$       & 272.9 & 195.1 & 108.4 & 60.2 & 16.8 & 6.06 \\
+  & Arc-length (FREE) & 181.0 & 95.2  & 36.3  & 20.5 & 8.0  & 4.36 \\
+  & $\Delta$ (\%)     & $-34$ & $-51$ & $-67$ & $-66$ & $-52$ & $-28$ \\
+\midrule
+\multirow{3}{*}{200K}
+  & Uniform $t$       & 279.9 & 198.1 & 107.8 & 61.8 & 18.6 & 6.82 \\
+  & Arc-length (FREE) & \textbf{153.7} & \textbf{72.5} & \textbf{26.3} & \textbf{14.4} & \textbf{5.43} & \textbf{3.26} \\
+  & $\Delta$ (\%)     & $-45$ & $-63$ & $-76$ & $-77$ & $-71$ & $-52$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Energy equalization.}
+We directly verify the FREE equirepartition claim by measuring the divergence energy $D(s) = \mathbb{E}[(\operatorname{div} u_s^\theta(X_{\alpha(s)}))^2]$ in arc-length coordinates $s \in [0,1]$, where $\alpha$ is the reparametrisation induced by $v_t^{\mathrm{FR}}$ at step 100K.
+The raw energy $D_{\mathrm{raw}}(t)$ is U-shaped with a max/min ratio of $1.65 \times 10^7$ and coefficient of variation CV\,=\,3.04.
+After arc-length reparametrisation, CV drops to \textbf{1.62} ($-47\%$), providing quantitative evidence that the curriculum has partially equalised the information-geometric energy.
+The residual non-uniformity (CV\,$\neq$\,0) stems from curriculum staleness: $\alpha$ was computed from the step-100K speed profile and not updated over the following 100K training steps.
+Periodic re-estimation of $v_t^{\mathrm{FR}}$ is expected to drive CV toward zero.

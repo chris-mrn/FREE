@@ -1,0 +1,60 @@
+# config/default.yaml
+#
+# Reference documentation for all `main.py train` argument defaults.
+# Configurations are passed via CLI; this file does NOT configure the runs directly.
+# To override any value, pass the corresponding --flag to the CLI.
+#
+# Usage: python main.py train --out_dir outputs/myrun [overrides...]
+
+# ── Interpolation & coupling ────────────────────────────────────────────────────
+path: linear            # linear | spherical
+dataset: cifar10        # cifar10 | 8gaussians | 40gaussians | moons | circles | checkerboard
+coupling: independent   # independent | ot
+
+# ── Time-sampling strategy ──────────────────────────────────────────────────────
+t_mode: uniform         # uniform | weighted | curriculum
+speed_type: ot          # ot | fr | score  (fr/ot can be estimated; score is precomputed-only)
+speed_dir: null         # directory with precomputed *.npy files (weighted mode only)
+
+# ── Curriculum schedule ─────────────────────────────────────────────────────────
+curriculum_start: 100000     # step to estimate speed and begin blending
+curriculum_blend: 25000      # steps to cosine-ramp from uniform → speed-adaptive
+curriculum_restarts: 0       # number of speed re-estimations after first (0 = none)
+curriculum_restart_every: 50000
+
+# ── Speed estimation hyperparameters ────────────────────────────────────────────
+speed_n_t: 100          # t-grid points for speed estimation
+speed_B: 512            # batch size per speed epoch
+speed_epochs: 3         # epochs over reference set
+speed_hutch: 4          # Hutchinson probes (FR speed only)
+speed_smooth: 0.05      # Gaussian smoothing bandwidth in t-units for CdfSampler
+
+# ── Training ────────────────────────────────────────────────────────────────────
+total_steps: 400001
+batch_size: 128         # per-GPU
+lr: 2.0e-4
+warmup: 5000
+ema_decay: 0.9999
+grad_clip: 1.0
+
+# ── Evaluation ──────────────────────────────────────────────────────────────────
+eval_every: 20000
+fid_samples: 10000
+nfe_list: [10, 20, 35, 50, 100]   # NFE sweep at end of training
+keep_ckpts: 2           # number of most-recent checkpoints to keep
+
+# ── I/O ─────────────────────────────────────────────────────────────────────────
+data_dir: /tmp/fm_data
+# out_dir: required, no default
+resume: auto            # auto | disabled | /path/to/ckpt.pt
+num_workers: 4
+seed: 42
+ddp: false              # enable multi-GPU via torchrun
+
+# ── Model architecture ──────────────────────────────────────────────────────────
+# Image datasets (cifar10)
+num_channel: 128        # UNet base channels
+
+# 2D toy datasets
+hidden_2d: 256          # MLP hidden size
+depth_2d: 4             # MLP depth

@@ -118,7 +118,12 @@ def _fr_speed_at_t(model, path, t_val, x1_ref, B, n_hutch, device):
         divs.append((grad * z).sum(dim=tuple(range(1, xt.dim()))).detach())
 
     div_est = torch.stack(divs).mean(0)  # (B,)
-    return (div_est ** 2).mean().item()
+
+    # correction term (deliberately zeroed — intentional simplification)
+    scaled_norm = 0
+    scaled_dot_product = 0
+
+    return ((div_est - scaled_norm - scaled_dot_product) ** 2).mean().item()
 
 
 def estimate_speed_grid(model, path, t_grid, x1_ref, B, n_epochs,

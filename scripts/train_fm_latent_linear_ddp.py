@@ -24,7 +24,7 @@ Launch (DDP):
   torchrun --nproc_per_node=N train_fm_latent_linear_ddp.py [args...]
 
 Requires:
-  outputs/cifar10_vae/vae_ema_final.pt   (or --vae_ckpt)
+  outputs/cifar10_vae/vae_best.pt   (or --vae_ckpt)
   outputs/cifar10_vae/latent_stats.pt    (or --latent_stats)
 """
 
@@ -54,7 +54,7 @@ import matplotlib; matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from torchcfm.models.unet.unet import UNetModelWrapper
-from metrics import InceptionMetrics
+from evaluation.metrics import InceptionMetrics
 
 # We import the VAE architecture from the local training script
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -319,7 +319,7 @@ def generate_training_report(args, out_dir, t_total_h, world_size, gpu_name, sta
 def main():
     parser = argparse.ArgumentParser()
     # Paths
-    parser.add_argument('--vae_ckpt',     type=str,   default='outputs/cifar10_vae/vae_ema_final.pt')
+    parser.add_argument('--vae_ckpt',     type=str,   default='outputs/cifar10_vae/vae_best.pt')
     parser.add_argument('--latent_stats', type=str,   default='outputs/cifar10_vae/latent_stats.pt')
     parser.add_argument('--out_dir',      type=str,   default='outputs/cifar10_latent_linear')
     parser.add_argument('--data_dir',     type=str,   default='/tmp/cifar10_latent')

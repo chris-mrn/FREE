@@ -16,7 +16,7 @@ mkdir -p "$OUT_DIR" "$DATA_DIR"
 
 echo "=== Linear FM on CIFAR-10 ===" && echo "Node: $(hostname)" && date
 
-PYTHONPATH=$REPO $PYBIN $REPO/train.py \
+PYTHONPATH=$REPO $PYBIN $REPO/main.py train \
     --path          linear              \
     --dataset       cifar10             \
     --coupling      independent         \

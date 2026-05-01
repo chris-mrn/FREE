@@ -1,0 +1,35 @@
+
+======================================================================
+MEMORIZATION DETECTION REPORT
+======================================================================
+
+DATASET:
+  Generated images: 320
+  Training images (reference): 5000
+
+NEAREST-NEIGHBOR DISTANCE ANALYSIS (Cosine Distance in Embedding Space):
+  Min distance:           0.132963
+  Max distance:           0.332889
+  Mean distance:          0.219947
+  Median distance:        0.215173
+  Std dev:                0.037036
+
+MEMORIZATION INDICATORS:
+  Extremely close (< 0.05):    0 / 320  ( 0.00%)
+  Suspicious (< 0.15):    5 / 320  ( 1.56%)
+
+DIVERSITY OF GENERATED IMAGES:
+  Avg pairwise distance (diversity): 0.299417
+  (Higher = more diverse; values typically in [0.3, 1.0])
+
+CONCLUSION:
+  LIKELY NO MEMORIZATION
+  Confidence: HIGH
+
+INTERPRETATION:
+  - If many generated images have very small distances to training images,
+    the model may be memorizing or overfitting.
+  - A mean distance around 0.5 suggests reasonable diversity.
+  - Mean distance < 0.3 with many suspicious matches suggests memorization.
+
+======================================================================

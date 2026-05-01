@@ -227,7 +227,7 @@ def main():
                              'weighting before schedule integration (0 to disable)')
     parser.add_argument('--w_cap',        type=float, default=100.0,
                         help='Hard cap on normalised weighting (-1 to disable)')
-    parser.add_argument('--w_pow',        type=float, default=0.5,
+    parser.add_argument('--w_pow',        type=float, default=1.0,
                         help='Exponent for speed→weighting: w ∝ v^{-w_pow}. '
                              '1.0=standard inverse, 0.5=sqrt-inverse, 0.0=uniform')
     parser.add_argument('--data_dir', type=str, default='/tmp/fm_results/data')

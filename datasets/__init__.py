@@ -1,4 +1,5 @@
-from .datasets import (
+# Backward-compat shim — canonical location is now data.datasets
+from data.datasets import (
     is_image, get_x0_shape, get_cifar10_loaders, collect_images, sample_2d,
 )
 

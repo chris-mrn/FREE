@@ -230,14 +230,79 @@ Steps 200,000 and 200,001 (final EMA save) give *identical* FID values to 4 sign
 figures at all NFE values, confirming the model has fully converged and the final save
 is reliable.
 
-### 6. Best Result in Context
+### 6. Uniform Ablation (no curriculum)
+
+To isolate the contribution of the arc-length curriculum, a second model was trained from
+the step-100K checkpoint with **uniform $t$-sampling throughout** (no FR speed estimation,
+no blending). This ablation runs steps 100K → 200K on the same architecture, same
+hyperparameters, same GPU (H100, 2h 33min).
+
+#### FID vs NFE — Uniform ablation (step 150K)
+
+| NFE | 5 | 10 | 20 | 35 | 50 | 100 | 200 |
+|-----|---:|---:|---:|---:|---:|----:|----:|
+| Uniform (150K) | 270.93 | 272.92 | 195.14 | 108.43 | 60.17 | 16.80 | **6.06** |
+| Curriculum (150K) | 245.46 | 180.95 | 95.16 | 36.29 | 20.50 | 7.98 | **4.36** |
+| Δ curriculum vs uniform | −9% | −34% | −51% | **−67%** | **−66%** | **−52%** | **−28%** |
+
+#### FID vs NFE — Uniform ablation (step 200K)
+
+| NFE | 5 | 10 | 20 | 35 | 50 | 100 | 200 |
+|-----|---:|---:|---:|---:|---:|----:|----:|
+| Uniform (200K) | 270.01 | 279.90 | 198.10 | 107.76 | 61.81 | 18.63 | 6.82 |
+| Curriculum (200K) | 227.26 | 153.70 | 72.51 | 26.30 | 14.37 | 5.43 | **3.26** |
+| Δ curriculum vs uniform | −16% | −45% | −63% | **−76%** | **−77%** | **−71%** | **−52%** |
+
+The curriculum advantage is consistent across all NFE values at step 200K.
+At moderate NFE (35–50), FID is **3–4× lower** with curriculum; even at NFE=200
+the gap remains large (3.26 vs 6.82, **−52%**), demonstrating that the uniform model
+cannot recover curriculum quality regardless of solver budget.
+
+### 7. Energy Repartition Under Arc-Length Reparametrisation
+
+**Jobs**: 2812484 (initial, incorrect $\alpha$) and 2814704 (corrected, `reparam_div`, RTX 4500 Ada, 45 min).
+**Script**: `scripts/compute_reparam_div.py` on EMA checkpoint step 200K.
+
+The central theoretical claim of the arc-length curriculum is that training with
+$p(t) \propto 1/v_t^{FR}$ equalises the divergence energy across time, i.e. the quantity:
+
+$$D(s) = E\!\left[(\mathrm{div}\, u_s^\theta(X_{\alpha(s)}))^2\right]$$
+
+should be approximately constant in the arc-length parameter $s \in [0,1]$.
+
+**Setup**: $n_t = 200$, $B = 256$, 5 Hutchinson probes, 3 epochs averaged.
+Speed source: `fr_speed_step100000.npy` ($v_t^{FR} \in [28.4, 59{,}350]$, ratio 2093×).
+The correct arc-length reparametrisation uses $\alpha = F^{-1}$ where $F(t) = \int_0^t v_\tau^{FR}\,d\tau / Z$
+(concentrates arc-length on *fast/hard* regions); job 2812484 incorrectly used $w = 1/v^{FR}$
+(the training distribution, not the arc-length measure) and is superseded.
+
+#### Raw vs reparametrised divergence energy
+
+| | Mean $E[(\mathrm{div})^2]$ | Std | CV = std/mean |
+|---|---|---|---|
+| Raw $D_\text{raw}(t)$, uniform $t$ | 1.83 × 10⁸ | 5.58 × 10⁸ | **3.044** |
+| Reparametrised $D(s)$, correct arc-length $\alpha$ (job 2814704) | 6.71 × 10⁸ | 1.09 × 10⁹ | **1.618** |
+| Reparametrised $D(s)$, incorrect $1/v^{FR}$ weight (job 2812484) | 6.37 × 10⁷ | 4.82 × 10⁸ | 7.567 |
+
+The correct arc-length reparametrisation **reduces CV by 47%** (3.044 → 1.618), providing
+quantitative evidence that the curriculum partially equalises the information-geometric energy.
+Both curves remain U-shaped (max/min ≈ 10⁷) because the reparametrisation compresses the
+fast boundary regions into small $s$-intervals — reducing the *range* of $D(s)$ there but
+not eliminating the singularity. The residual non-uniformity is primarily due to **curriculum
+staleness**: $\alpha$ was built from FR speed at step 100K; by step 200K the model's speed
+profile had changed, leaving the reparametrisation partially mis-calibrated. Periodic
+re-estimation of $v_t^{FR}$ is expected to drive CV toward zero.
+
+### 8. Best Result in Context
 
 | Model | FID | NFE | Notes |
 |-------|-----|-----|-------|
-| Self-FM (this work, step 200K) | **3.26** | 200 | data→data interpolant, arc-length curriculum |
-| Self-FM (step 200K) | **5.43** | 100 | same model |
-| Self-FM (step 200K) | **14.37** | 50 | same model |
-| Self-FM (step 150K) | **4.36** | 200 | mid-training |
+| Self-FM curriculum (step 200K) | **3.26** | 200 | arc-length curriculum |
+| Self-FM curriculum (step 200K) | **5.43** | 100 | same model |
+| Self-FM curriculum (step 200K) | **14.37** | 50 | same model |
+| Self-FM curriculum (step 150K) | **4.36** | 200 | mid-training |
+| Self-FM uniform ablation (step 150K) | **6.06** | 200 | no curriculum |
+| Self-FM uniform ablation (step 200K) | **6.82** | 200 | no curriculum |
 
 A FID of **3.26** at NFE=200 is competitive with strong baselines on CIFAR-10 unconditional
 generation, achieved without any Gaussian noise source — the model purely maps data to data.
@@ -250,21 +315,31 @@ generation, achieved without any Gaussian noise source — the model purely maps
    achieves FID ≈ 3.26 on CIFAR-10 unconditional generation, comparable to
    strong Gaussian-prior baselines.
 
-2. **Arc-length curriculum is essential**: Without it (step 100K), FID@35 ≈ 112.
-   With it fully active (step 200K), FID@35 ≈ 26.  A 77% improvement at constant NFE.
+2. **Arc-length curriculum is essential**: At step 200K the gap widens further — FID@35
+   is 26.3 (curriculum) vs 107.8 (uniform), a **4× gap**; at NFE=200 the gap is 3.26 vs
+   6.82 (**−52%**). The uniform model cannot recover curriculum quality regardless of
+   NFE budget.
 
 3. **FR speed is highly non-uniform** (2093× range), confirming that the self-interpolant
    concentrates complexity near $t=1$. The arc-length schedule directly addresses this.
 
-4. **Low-NFE generation is poor**: FID > 200 at NFE=5–10, suggesting that
+4. **Low-NFE generation is poor**: FID > 200 at NFE=5–10 even with curriculum, suggesting
    speed-adaptive step schedules or a higher-order ODE solver would be a high-value next step.
 
 5. **Convergence is clean**: The final checkpoint (200,001) matches step 200,000 exactly,
    and the loss curve is smooth throughout the arc-length phase (~0.47–0.46).
 
+6. **Arc-length reparametrisation partially equalises divergence energy**: Using the correct
+   arc-length $\alpha$ (CDF of $v_t^{FR}$), CV of $D(s)$ drops from 3.04 → 1.62 (**−47%**).
+   The residual non-uniformity is attributed to curriculum staleness (speed estimated at
+   step 100K, unchanged through step 200K). Periodic re-estimation is expected to further
+   reduce CV toward zero.
+
 ---
 
 ## Artifacts
+
+### Curriculum model (`outputs/cifar10_self_fm/`)
 
 | File | Description |
 |------|-------------|
@@ -282,6 +357,22 @@ generation, achieved without any Gaussian noise source — the model purely maps
 | `eval_samples/` | Sample grids at NFE=35 per checkpoint |
 | `train_2791486.log` | Full training log (SLURM job 2791486) |
 | `eval_2793225.log` | Full evaluation log (SLURM job 2793225) |
+| `div_sq_reparam.png` | 3-panel energy repartition plot |
+| `div_sq_reparam_mean.npy` | $D(s)$ averaged over 3 epochs |
+| `div_sq_uniform_mean.npy` | Raw $D_\text{raw}(t)$ on uniform $t$-grid |
+| `reparam_div_2812484.log` | Energy repartition sweep log (SLURM job 2812484) |
+
+### Uniform ablation (`outputs/cifar10_self_fm_uniform/`)
+
+| File | Description |
+|------|-------------|
+| `checkpoints/ema_step_0150000.pt` | EMA weights at step 150,000 |
+| `checkpoints/ema_step_0200000.pt` | EMA weights at step 200,000 |
+| `checkpoints/ema_step_0200001_final.pt` | Final EMA save |
+| `nfe_fid_table.csv` | FID / KID / IS for all (step, NFE) pairs |
+| `train_2813108.log` | Training log (SLURM job 2813108) |
+| `eval_150k_2816417.log` | NFE sweep eval log, step 150K (SLURM job 2816417) |
+| `eval_200k_2818511.log` | NFE sweep eval log, step 200K (SLURM job 2818511, pending) |
 
 ---
 

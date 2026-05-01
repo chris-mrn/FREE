@@ -41,7 +41,7 @@ sys.path.insert(0, '/nfs/ghome/live/cmarouani/FREE')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'training'))
 
 from torchcfm.models.unet.unet import UNetModelWrapper
-from metrics import InceptionMetrics
+from evaluation.metrics import InceptionMetrics
 
 T_MAX = math.pi / 2   # spherical path: t in [0, pi/2]
 
